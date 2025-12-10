@@ -10,7 +10,7 @@ Usage:
 import sys
 import time
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 
 class BatchUploader:
@@ -33,6 +33,7 @@ class BatchUploader:
         self.success_count = 0
         self.fail_count = 0
         self.failed_files = []
+        self.upload_stats = []  # アップロード統計情報
         
         print("✓ Initialized MCP client and file service")
     
@@ -80,6 +81,13 @@ class BatchUploader:
                 self.failed_files.append((file_path, dest_path, "File not found"))
                 return False
             
+            # ファイルサイズを取得（バイト）
+            file_size = file_path_obj.stat().st_size
+            file_size_mb = file_size / (1024 * 1024)  # MB単位
+            
+            # 時間計測開始
+            start_time = time.time()
+            
             # FileService.upload_filesを使用（ジェネレータ）
             gen = self.file_service.upload_files(
                 source="explorer",
@@ -94,13 +102,41 @@ class BatchUploader:
             for log_chunk in gen:
                 last_log = log_chunk
             
+            # 時間計測終了
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            
             # 成功判定（簡易版）
             if "✅" in last_log or "Upload Complete" in last_log:
                 print(f"  ✅ Success: {file_path_obj.name}")
+                print(f"     Size: {file_size_mb:.2f} MB, Time: {elapsed_time:.2f} sec")
+                
+                # 統計情報を保存
+                self.upload_stats.append({
+                    'file_name': file_path_obj.name,
+                    'file_path': file_path,
+                    'file_size_bytes': file_size,
+                    'file_size_mb': file_size_mb,
+                    'upload_time_sec': elapsed_time,
+                    'success': True
+                })
+                
                 self.success_count += 1
                 return True
             else:
                 print(f"  ❌ Failed: {file_path_obj.name}")
+                print(f"     Size: {file_size_mb:.2f} MB, Time: {elapsed_time:.2f} sec")
+                
+                # 失敗時も統計情報を保存
+                self.upload_stats.append({
+                    'file_name': file_path_obj.name,
+                    'file_path': file_path,
+                    'file_size_bytes': file_size,
+                    'file_size_mb': file_size_mb,
+                    'upload_time_sec': elapsed_time,
+                    'success': False
+                })
+                
                 self.fail_count += 1
                 self.failed_files.append((file_path, dest_path, "Upload failed"))
                 return False
@@ -158,6 +194,40 @@ class BatchUploader:
                 print(f"   - {file_path} → {dest_path}")
                 if reason:
                     print(f"     Reason: {reason}")
+        
+        # 統計情報を表示
+        if self.upload_stats:
+            print(f"\n{'='*60}")
+            print(f"⏱️  Upload Statistics")
+            print(f"{'='*60}")
+            
+            # 成功したファイルのみで統計計算
+            successful_stats = [s for s in self.upload_stats if s['success']]
+            
+            if successful_stats:
+                total_size = sum(s['file_size_mb'] for s in successful_stats)
+                total_time = sum(s['upload_time_sec'] for s in successful_stats)
+                avg_time = total_time / len(successful_stats) if successful_stats else 0
+                avg_speed = total_size / total_time if total_time > 0 else 0
+                
+                print(f"Total Size:      {total_size:.2f} MB")
+                print(f"Total Time:      {total_time:.2f} sec")
+                print(f"Average Time:    {avg_time:.2f} sec/file")
+                print(f"Average Speed:   {avg_speed:.2f} MB/sec")
+                
+                print(f"\n📋 Individual File Statistics:")
+                print(f"{'No.':<4} {'File Name':<30} {'Size (MB)':<12} {'Time (sec)':<12} {'Speed (MB/s)':<12}")
+                print(f"{'-'*80}")
+                
+                for i, stat in enumerate(self.upload_stats, 1):
+                    speed = stat['file_size_mb'] / stat['upload_time_sec'] if stat['upload_time_sec'] > 0 else 0
+                    status = "✅" if stat['success'] else "❌"
+                    
+                    file_name = stat['file_name']
+                    if len(file_name) > 28:
+                        file_name = file_name[:25] + "..."
+                    
+                    print(f"{i:<4} {file_name:<30} {stat['file_size_mb']:<12.2f} {stat['upload_time_sec']:<12.2f} {speed:<12.2f} {status}")
         
         print(f"{'='*60}\n")
 
