@@ -75,14 +75,17 @@ class SearchBenchmark:
             # 時間計測開始
             start_time = time.time()
             
-            # 検索実行
-            response = self.client_manager.send_request(
-                "search",
-                {
-                    "query": query,
-                    "limit": limit,
-                    "mode": mode
-                }
+            # SearchServiceを使って検索実行
+            response = self.search_service.search(
+                query=query,
+                limit=limit,
+                mode=mode,
+                domains_text="",  # 全ドメインを検索
+                metadata_filter_text="",  # フィルタなし
+                use_rerank=False,  # リランク設定（必要に応じて変更）
+                dense_threshold_text="",  # デフォルト閾値を使用
+                sparse_threshold_text="",  # デフォルト閾値を使用
+                rerank_threshold_text="",  # デフォルト閾値を使用
             )
             
             # 時間計測終了
@@ -91,7 +94,8 @@ class SearchBenchmark:
             
             # 結果の解析
             if response.get("success"):
-                results = response.get("results", [])
+                data = response.get("data", {})
+                results = data.get("results", [])
                 
                 result_data = {
                     "query": query,
@@ -426,11 +430,10 @@ def main():
     # ========================================
     queries = [
         # ここに検索したいクエリを追加
-        "機能仕様書",
-        "入力チェック",
-        "データベース",
-        "エラー処理",
-        "API 仕様",
+        "USDM",
+        "MBD",
+        "MBSE",
+        "SPL",
     ]
     
     # クエリが空の場合はサンプルクエリを使用
@@ -445,6 +448,7 @@ def main():
     MODE = "hybrid"  # 検索モード: "semantic", "keyword", "hybrid"
     USE_HTTP = False  # HTTPモードを使うか
     HTTP_URL = "http://localhost:8000/mcp"
+    USE_RERANK = False  # リランクを使用するか（config.pyのreranker.enabledに依存）
     
     # 出力ファイル名
     OUTPUT_JSON = "search_results.json"
@@ -455,8 +459,13 @@ def main():
     # ベンチマーク実行
     # ========================================
     print(f"📝 Total queries to execute: {len(queries)}")
+    print(f"⚙️  Settings: mode={MODE}, limit={LIMIT}, rerank={USE_RERANK}")
     
     benchmark = SearchBenchmark()
+    
+    # リランク設定を上書き（必要に応じて）
+    # SearchServiceのuse_rerankパラメータで制御されるため、
+    # search_single_query内でuse_rerank=USE_RERANKを渡す
     
     try:
         # MCPサーバに接続
