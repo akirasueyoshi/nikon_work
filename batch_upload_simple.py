@@ -9,8 +9,10 @@ Usage:
 
 import sys
 import time
+import re
 from pathlib import Path
 from typing import List, Tuple, Dict
+from datetime import datetime
 
 
 class BatchUploader:
@@ -97,10 +99,15 @@ class BatchUploader:
                 progress_callback=None
             )
             
-            # ジェネレータから最後のログを取得
+            # ジェネレータからログを取得し、チャンク数を抽出
             last_log = ""
+            chunk_count = 0
             for log_chunk in gen:
                 last_log = log_chunk
+                # チャンク数を抽出（例: "Created 15 chunks"）
+                match = re.search(r'Created (\d+) chunks?', log_chunk)
+                if match:
+                    chunk_count = int(match.group(1))
             
             # 時間計測終了
             end_time = time.time()
@@ -109,7 +116,7 @@ class BatchUploader:
             # 成功判定（簡易版）
             if "✅" in last_log or "Upload Complete" in last_log:
                 print(f"  ✅ Success: {file_path_obj.name}")
-                print(f"     Size: {file_size_mb:.2f} MB, Time: {elapsed_time:.2f} sec")
+                print(f"     Size: {file_size_mb:.2f} MB, Time: {elapsed_time:.2f} sec, Chunks: {chunk_count}")
                 
                 # 統計情報を保存
                 self.upload_stats.append({
@@ -118,6 +125,7 @@ class BatchUploader:
                     'file_size_bytes': file_size,
                     'file_size_mb': file_size_mb,
                     'upload_time_sec': elapsed_time,
+                    'chunk_count': chunk_count,
                     'success': True
                 })
                 
@@ -134,6 +142,7 @@ class BatchUploader:
                     'file_size_bytes': file_size,
                     'file_size_mb': file_size_mb,
                     'upload_time_sec': elapsed_time,
+                    'chunk_count': 0,
                     'success': False
                 })
                 
@@ -170,6 +179,7 @@ class BatchUploader:
             print()
         
         self.print_summary()
+        self.save_summary_markdown()
     
     def disconnect(self):
         """MCPサーバから切断"""
@@ -207,17 +217,21 @@ class BatchUploader:
             if successful_stats:
                 total_size = sum(s['file_size_mb'] for s in successful_stats)
                 total_time = sum(s['upload_time_sec'] for s in successful_stats)
+                total_chunks = sum(s['chunk_count'] for s in successful_stats)
                 avg_time = total_time / len(successful_stats) if successful_stats else 0
                 avg_speed = total_size / total_time if total_time > 0 else 0
+                avg_chunks = total_chunks / len(successful_stats) if successful_stats else 0
                 
                 print(f"Total Size:      {total_size:.2f} MB")
                 print(f"Total Time:      {total_time:.2f} sec")
+                print(f"Total Chunks:    {total_chunks}")
                 print(f"Average Time:    {avg_time:.2f} sec/file")
                 print(f"Average Speed:   {avg_speed:.2f} MB/sec")
+                print(f"Average Chunks:  {avg_chunks:.2f} chunks/file")
                 
                 print(f"\n📋 Individual File Statistics:")
-                print(f"{'No.':<4} {'File Name':<30} {'Size (MB)':<12} {'Time (sec)':<12} {'Speed (MB/s)':<12}")
-                print(f"{'-'*80}")
+                print(f"{'No.':<4} {'File Name':<30} {'Size (MB)':<12} {'Time (sec)':<12} {'Chunks':<10} {'Speed (MB/s)':<12}")
+                print(f"{'-'*90}")
                 
                 for i, stat in enumerate(self.upload_stats, 1):
                     speed = stat['file_size_mb'] / stat['upload_time_sec'] if stat['upload_time_sec'] > 0 else 0
@@ -227,9 +241,81 @@ class BatchUploader:
                     if len(file_name) > 28:
                         file_name = file_name[:25] + "..."
                     
-                    print(f"{i:<4} {file_name:<30} {stat['file_size_mb']:<12.2f} {stat['upload_time_sec']:<12.2f} {speed:<12.2f} {status}")
+                    print(f"{i:<4} {file_name:<30} {stat['file_size_mb']:<12.2f} {stat['upload_time_sec']:<12.2f} {stat['chunk_count']:<10} {speed:<12.2f} {status}")
         
         print(f"{'='*60}\n")
+    
+    def save_summary_markdown(self, output_dir: str = "summary/upload"):
+        """サマリーをMarkdown形式で保存"""
+        # ディレクトリを作成（親ディレクトリも含めて作成）
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        # タイムスタンプ付きファイル名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"upload_summary_{timestamp}.md"
+        filepath = output_path / filename
+        
+        # Markdown内容を生成
+        md_content = []
+        md_content.append("# Upload Summary Report\n")
+        md_content.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        md_content.append("---\n")
+        
+        # サマリー
+        md_content.append("## 📊 Upload Summary\n")
+        md_content.append(f"- ✅ **Success:** {self.success_count}\n")
+        md_content.append(f"- ❌ **Failed:** {self.fail_count}\n")
+        
+        # 失敗ファイル
+        if self.failed_files:
+            md_content.append("\n### ⚠️ Failed Files\n")
+            for file_path, dest_path, reason in self.failed_files:
+                md_content.append(f"- **File:** `{file_path}`\n")
+                md_content.append(f"  - **Destination:** `{dest_path}`\n")
+                if reason:
+                    md_content.append(f"  - **Reason:** {reason}\n")
+        
+        # 統計情報
+        if self.upload_stats:
+            successful_stats = [s for s in self.upload_stats if s['success']]
+            
+            if successful_stats:
+                total_size = sum(s['file_size_mb'] for s in successful_stats)
+                total_time = sum(s['upload_time_sec'] for s in successful_stats)
+                total_chunks = sum(s['chunk_count'] for s in successful_stats)
+                avg_time = total_time / len(successful_stats) if successful_stats else 0
+                avg_speed = total_size / total_time if total_time > 0 else 0
+                avg_chunks = total_chunks / len(successful_stats) if successful_stats else 0
+                
+                md_content.append("\n## ⏱️ Upload Statistics\n")
+                md_content.append(f"- **Total Size:** {total_size:.2f} MB\n")
+                md_content.append(f"- **Total Time:** {total_time:.2f} sec\n")
+                md_content.append(f"- **Total Chunks:** {total_chunks}\n")
+                md_content.append(f"- **Average Time:** {avg_time:.2f} sec/file\n")
+                md_content.append(f"- **Average Speed:** {avg_speed:.2f} MB/sec\n")
+                md_content.append(f"- **Average Chunks:** {avg_chunks:.2f} chunks/file\n")
+                
+                # 個別ファイル統計（表形式）
+                md_content.append("\n## 📋 Individual File Statistics\n")
+                md_content.append("| No. | File Name | Size (MB) | Time (sec) | Chunks | Speed (MB/s) | Status |\n")
+                md_content.append("|-----|-----------|-----------|------------|--------|--------------|--------|\n")
+                
+                for i, stat in enumerate(self.upload_stats, 1):
+                    speed = stat['file_size_mb'] / stat['upload_time_sec'] if stat['upload_time_sec'] > 0 else 0
+                    status = "✅" if stat['success'] else "❌"
+                    
+                    md_content.append(
+                        f"| {i} | `{stat['file_name']}` | {stat['file_size_mb']:.2f} | "
+                        f"{stat['upload_time_sec']:.2f} | {stat['chunk_count']} | "
+                        f"{speed:.2f} | {status} |\n"
+                    )
+        
+        # ファイルに書き込み
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.writelines(md_content)
+        
+        print(f"✓ Summary saved to: {filepath}")
 
 
 def main():
@@ -242,11 +328,8 @@ def main():
     # ========================================
     uploads = [
         # (ファイルパス, アップロード先, 説明)
-        ("files/test/test.md", "domain/path/", "Test markdown file"),
-        ("files/specs/spec1.docx", "specifications/", "Specification document 1"),
-        ("files/specs/spec2.docx", "specifications/", "Specification document 2"),
-        ("files/design/design.xlsx", "designs/", "Design spreadsheet"),
-        ("files/manuals/manual.pdf", "manuals/", "User manual"),
+        ("files/test/MBD.md", "domain/path/", "Test markdown file"),
+        
     ]
     
     # ========================================

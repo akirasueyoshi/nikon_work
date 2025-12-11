@@ -167,24 +167,43 @@ class SearchBenchmark:
         print(f"✨ Benchmark completed!")
         print(f"{'='*60}\n")
     
-    def save_results_json(self, output_file: str = "search_results.json"):
+    def save_results_json(self, output_dir: str = "summary/search", filename: str = "search_results.json"):
         """結果をJSON形式で保存"""
-        timestamp = datetime.now().isoformat()
+        # ディレクトリを作成
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        # タイムスタンプ付きファイル名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamped_filename = f"search_results_{timestamp}.json"
+        filepath = output_path / timestamped_filename
+        
+        timestamp_iso = datetime.now().isoformat()
         
         output_data = {
-            "timestamp": timestamp,
+            "timestamp": timestamp_iso,
             "total_queries": len(self.results),
             "results": self.results
         }
         
-        with open(output_file, 'w', encoding='utf-8') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(output_data, f, ensure_ascii=False, indent=2)
         
-        print(f"✓ Results saved to: {output_file}")
+        print(f"✓ Results saved to: {filepath}")
+        return filepath
     
-    def save_results_csv(self, output_file: str = "search_results.csv"):
+    def save_results_csv(self, output_dir: str = "summary/search", filename: str = "search_results_summary.csv"):
         """結果をCSV形式で保存（サマリー）"""
-        with open(output_file, 'w', newline='', encoding='utf-8') as f:
+        # ディレクトリを作成
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        # タイムスタンプ付きファイル名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamped_filename = f"search_summary_{timestamp}.csv"
+        filepath = output_path / timestamped_filename
+        
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             
             # ヘッダー
@@ -210,11 +229,21 @@ class SearchBenchmark:
                     result.get("error", "")
                 ])
         
-        print(f"✓ Results saved to: {output_file}")
+        print(f"✓ Results saved to: {filepath}")
+        return filepath
     
-    def save_detailed_results_csv(self, output_file: str = "search_results_detailed.csv"):
+    def save_detailed_results_csv(self, output_dir: str = "summary/search", filename: str = "search_results_detailed.csv"):
         """結果をCSV形式で保存（詳細版：全検索結果）"""
-        with open(output_file, 'w', newline='', encoding='utf-8') as f:
+        # ディレクトリを作成
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        # タイムスタンプ付きファイル名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamped_filename = f"search_detailed_{timestamp}.csv"
+        filepath = output_path / timestamped_filename
+        
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             
             # ヘッダー
@@ -250,7 +279,99 @@ class SearchBenchmark:
                         result.get("error", "No results")
                     ])
         
-        print(f"✓ Detailed results saved to: {output_file}")
+        print(f"✓ Detailed results saved to: {filepath}")
+        return filepath
+    
+    def save_summary_markdown(self, output_dir: str = "summary/search"):
+        """サマリーをMarkdown形式で保存"""
+        # ディレクトリを作成
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        # タイムスタンプ付きファイル名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"search_summary_{timestamp}.md"
+        filepath = output_path / filename
+        
+        # Markdown内容を生成
+        md_content = []
+        md_content.append("# Search Benchmark Report\n")
+        md_content.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        md_content.append("---\n")
+        
+        # 統計情報
+        successful = [r for r in self.results if r["success"]]
+        failed = [r for r in self.results if not r["success"]]
+        
+        md_content.append("## 📊 Benchmark Statistics\n")
+        md_content.append(f"- **Total Queries:** {len(self.results)}\n")
+        md_content.append(f"- ✅ **Successful:** {len(successful)}\n")
+        md_content.append(f"- ❌ **Failed:** {len(failed)}\n")
+        
+        if successful:
+            response_times = [r["response_time_ms"] for r in successful]
+            result_counts = [r["result_count"] for r in successful]
+            
+            avg_response_time = sum(response_times) / len(response_times)
+            min_response_time = min(response_times)
+            max_response_time = max(response_times)
+            avg_result_count = sum(result_counts) / len(result_counts)
+            
+            md_content.append("\n### ⏱️ Response Time\n")
+            md_content.append(f"- **Average:** {avg_response_time:.2f} ms\n")
+            md_content.append(f"- **Min:** {min_response_time:.2f} ms\n")
+            md_content.append(f"- **Max:** {max_response_time:.2f} ms\n")
+            
+            md_content.append("\n### 📋 Results\n")
+            md_content.append(f"- **Avg Results/Query:** {avg_result_count:.2f}\n")
+        
+        # 失敗したクエリ
+        if failed:
+            md_content.append("\n## ⚠️ Failed Queries\n")
+            for result in failed:
+                md_content.append(f"- **Query:** `{result['query']}`\n")
+                md_content.append(f"  - **Error:** {result.get('error', 'Unknown error')}\n")
+        
+        # 個別クエリ結果（表形式）
+        md_content.append("\n## 📝 Individual Query Results\n")
+        md_content.append("| No. | Query | Mode | Success | Response Time (ms) | Result Count | Top 1 File | Top 1 Score |\n")
+        md_content.append("|-----|-------|------|---------|-------------------|--------------|------------|-------------|\n")
+        
+        for i, result in enumerate(self.results, 1):
+            top_file = result["results"][0]["file_path"] if result["results"] else "N/A"
+            top_score = result["results"][0]["score"] if result["results"] else 0
+            status = "✅" if result["success"] else "❌"
+            
+            # ファイル名が長い場合は短縮
+            if len(top_file) > 40:
+                top_file = "..." + top_file[-37:]
+            
+            md_content.append(
+                f"| {i} | `{result['query']}` | {result['mode']} | {status} | "
+                f"{result['response_time_ms']:.2f} | {result['result_count']} | "
+                f"`{top_file}` | {top_score:.4f} |\n"
+            )
+        
+        # 詳細結果（上位5件まで表示）
+        md_content.append("\n## 🔍 Top Results Details\n")
+        for i, result in enumerate(self.results, 1):
+            if result["success"] and result["results"]:
+                md_content.append(f"\n### Query {i}: `{result['query']}`\n")
+                md_content.append(f"**Response Time:** {result['response_time_ms']:.2f} ms | **Total Results:** {result['result_count']}\n\n")
+                
+                # 上位5件まで表示（結果がある分だけ）
+                for j, res in enumerate(result["results"][:5], 1):
+                    md_content.append(f"{j}. **Score: {res['score']:.4f}** | `{res['file_path']}`\n")
+                    if res['content_preview']:
+                        md_content.append(f"   > {res['content_preview']}\n")
+                    md_content.append("\n")
+        
+        # ファイルに書き込み
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.writelines(md_content)
+        
+        print(f"✓ Summary saved to: {filepath}")
+        return filepath
     
     def print_statistics(self):
         """統計情報を表示"""
@@ -430,10 +551,11 @@ def main():
     # ========================================
     queries = [
         # ここに検索したいクエリを追加
-        "USDM",
-        "MBD",
-        "MBSE",
-        "SPL",
+        "機能仕様書",
+        "入力チェック",
+        "データベース",
+        "エラー処理",
+        "API 仕様",
     ]
     
     # クエリが空の場合はサンプルクエリを使用
@@ -450,11 +572,6 @@ def main():
     HTTP_URL = "http://localhost:8000/mcp"
     USE_RERANK = False  # リランクを使用するか（config.pyのreranker.enabledに依存）
     
-    # 出力ファイル名
-    OUTPUT_JSON = "search_results.json"
-    OUTPUT_CSV = "search_results_summary.csv"
-    OUTPUT_CSV_DETAIL = "search_results_detailed.csv"
-    
     # ========================================
     # ベンチマーク実行
     # ========================================
@@ -462,10 +579,6 @@ def main():
     print(f"⚙️  Settings: mode={MODE}, limit={LIMIT}, rerank={USE_RERANK}")
     
     benchmark = SearchBenchmark()
-    
-    # リランク設定を上書き（必要に応じて）
-    # SearchServiceのuse_rerankパラメータで制御されるため、
-    # search_single_query内でuse_rerank=USE_RERANKを渡す
     
     try:
         # MCPサーバに接続
@@ -482,20 +595,22 @@ def main():
         # 統計情報を表示
         benchmark.print_statistics()
         
-        # 結果を保存
-        benchmark.save_results_json(OUTPUT_JSON)
-        benchmark.save_results_csv(OUTPUT_CSV)
-        benchmark.save_detailed_results_csv(OUTPUT_CSV_DETAIL)
+        # 結果を保存（すべてsummary/search/に保存）
+        #json_path = benchmark.save_results_json()
+        #csv_path = benchmark.save_results_csv()
+        #detail_path = benchmark.save_detailed_results_csv()
+        md_path = benchmark.save_summary_markdown()
         
     finally:
         # 切断
         benchmark.disconnect()
     
     print("\n✨ All done!")
-    print(f"\nOutput files:")
-    print(f"  - {OUTPUT_JSON} (JSON format, complete data)")
-    print(f"  - {OUTPUT_CSV} (CSV format, summary)")
-    print(f"  - {OUTPUT_CSV_DETAIL} (CSV format, all results)")
+    print(f"\nOutput files in summary/search/:")
+    print(f"  - JSON (complete data)")
+    print(f"  - CSV (summary)")
+    print(f"  - CSV (detailed results)")
+    print(f"  - Markdown (summary report)")
 
 
 if __name__ == "__main__":
