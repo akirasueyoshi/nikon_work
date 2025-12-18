@@ -371,7 +371,7 @@ def create_excel_report(document_graph_json, relevance_matrix_csv, ground_truth_
     
     # Sheet 3: ドキュメントとリンク
     ws_links = wb.create_sheet("ドキュメントとリンク")
-    headers = ["資料名", "ファイル名", "抽出リンク数", "マッチしたリンク数", "リンク先資料"]
+    headers = ["資料名", "ファイル名", "ディレクトリ", "抽出リンク数", "マッチしたリンク数", "リンク先資料"]
     for col_idx, header in enumerate(headers, 1):
         cell = ws_links.cell(1, col_idx, header)
         cell.fill = header_fill
@@ -383,15 +383,17 @@ def create_excel_report(document_graph_json, relevance_matrix_csv, ground_truth_
         matched_links = [link['target'] for link in doc_graph['links'] if link['source'] == doc['id']]
         ws_links.cell(row_idx, 1, doc['id']).border = border
         ws_links.cell(row_idx, 2, doc['filename']).border = border
-        ws_links.cell(row_idx, 3, doc['extracted_links_count']).border = border
-        ws_links.cell(row_idx, 4, len(matched_links)).border = border
-        ws_links.cell(row_idx, 5, ", ".join(matched_links) if matched_links else "(なし)").border = border
+        ws_links.cell(row_idx, 3, doc.get('directory', '')).border = border
+        ws_links.cell(row_idx, 4, doc['extracted_links_count']).border = border
+        ws_links.cell(row_idx, 5, len(matched_links)).border = border
+        ws_links.cell(row_idx, 6, ", ".join(matched_links) if matched_links else "(なし)").border = border
     
     ws_links.column_dimensions['A'].width = 40
     ws_links.column_dimensions['B'].width = 40
-    ws_links.column_dimensions['C'].width = 15
-    ws_links.column_dimensions['D'].width = 18
-    ws_links.column_dimensions['E'].width = 60
+    ws_links.column_dimensions['C'].width = 30
+    ws_links.column_dimensions['D'].width = 15
+    ws_links.column_dimensions['E'].width = 18
+    ws_links.column_dimensions['F'].width = 60
     
     # Sheet 4: リンク詳細
     ws_edges = wb.create_sheet("リンク詳細")

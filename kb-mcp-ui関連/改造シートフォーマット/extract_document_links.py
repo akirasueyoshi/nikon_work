@@ -98,27 +98,86 @@ def normalize_doc_name(name):
     return name
 
 
+def calculate_jaccard_similarity(links_a, links_b):
+    """
+    2つのリンクリスト間のJaccard係数を計算
+    
+    Parameters:
+        links_a: 資料Aが持つリンク先のセット
+        links_b: 資料Bが持つリンク先のセット
+    
+    Returns:
+        float: Jaccard係数 (0.0 ~ 1.0)
+    """
+    set_a = set(links_a)
+    set_b = set(links_b)
+    
+    if len(set_a) == 0 and len(set_b) == 0:
+        return 0.0
+    
+    intersection = len(set_a & set_b)
+    union = len(set_a | set_b)
+    
+    if union == 0:
+        return 0.0
+    
+    return intersection / union
+
+
 def build_document_graph(excel_dir):
     """
-    全エクセルファイルからドキュメントグラフを構築
+    全エクセルファイルからドキュメントグラフを構築（再帰的に探索）
     
     Returns:
         dict: {
             'documents': [資料情報のリスト],
             'links': [リンク情報のリスト],
-            'metadata': {メタデータ}
+            'metadata': {メタデータ},
+            'relevance_matrix': {共通情報ベースの関連度マトリクス}
         }
     """
     excel_dir = Path(excel_dir)
     
-    # 全エクセルファイルを取得（一時ファイルを除外）
+    # 全エクセルファイルを再帰的に取得（一時ファイルを除外）
+    print(f"Searching for Excel files in {excel_dir} (recursively)...")
     excel_files = []
-    for pattern in ['*.xlsx', '*.xls']:
-        excel_files.extend([f for f in excel_dir.glob(pattern) if not f.name.startswith('~$')])
+    
+    # rglob を使って再帰的に検索
+    for pattern in ['**/*.xlsx', '**/*.xls']:
+        for f in excel_dir.glob(pattern):
+            # 一時ファイルと隠しファイルを除外
+            if not f.name.startswith('~$') and not f.name.startswith('.'):
+                excel_files.append(f)
     
     excel_files = sorted(set(excel_files))  # 重複除去・ソート
     
-    print(f"Found {len(excel_files)} Excel files in {excel_dir}")
+    print(f"Found {len(excel_files)} Excel files")
+    
+    if len(excel_files) == 0:
+        print("Warning: No Excel files found!")
+        return {
+            'metadata': {
+                'extraction_date': datetime.now().isoformat(),
+                'source_directory': str(excel_dir),
+                'total_documents': 0,
+                'total_matched_links': 0,
+                'total_unmatched_links': 0,
+                'relevance_calculation_method': 'jaccard_similarity'
+            },
+            'documents': [],
+            'links': [],
+            'unmatched_links': [],
+            'relevance_matrix': {}
+        }
+    
+    # ディレクトリ構造を表示
+    print("\nDirectory structure:")
+    dirs = set([f.parent for f in excel_files])
+    for d in sorted(dirs):
+        relative_path = d.relative_to(excel_dir) if d != excel_dir else Path(".")
+        count = len([f for f in excel_files if f.parent == d])
+        print(f"  {relative_path}: {count} file(s)")
+    print()
     
     # ドキュメント情報を収集
     documents = []
@@ -126,7 +185,8 @@ def build_document_graph(excel_dir):
     
     for excel_file in excel_files:
         doc_name = excel_file.stem
-        print(f"Processing: {doc_name}")
+        relative_path = excel_file.relative_to(excel_dir)
+        print(f"Processing: {relative_path}")
         
         # リンク先を抽出
         links = extract_links_from_excel(excel_file)
@@ -136,6 +196,8 @@ def build_document_graph(excel_dir):
             'id': doc_name,
             'filename': excel_file.name,
             'path': str(excel_file),
+            'relative_path': str(relative_path),
+            'directory': str(excel_file.parent.relative_to(excel_dir)),
             'normalized_name': normalize_doc_name(doc_name),
             'extracted_links_count': len(links),
             'extracted_links': links
@@ -151,8 +213,11 @@ def build_document_graph(excel_dir):
     # リンクをマッチング
     matched_links = []
     unmatched_links = []
+    doc_to_matched_links = {}  # {doc_id: [matched_link_targets]}
     
     for source_doc, link_list in raw_links.items():
+        doc_to_matched_links[source_doc] = []
+        
         for link in link_list:
             normalized_link = normalize_doc_name(link)
             
@@ -166,6 +231,7 @@ def build_document_graph(excel_dir):
                     'original_text': link,
                     'match_type': 'exact'
                 })
+                doc_to_matched_links[source_doc].append(target_doc)
                 matched = True
             else:
                 # 部分一致を試みる
@@ -179,6 +245,7 @@ def build_document_graph(excel_dir):
                                 'original_text': link,
                                 'match_type': 'partial'
                             })
+                            doc_to_matched_links[source_doc].append(actual_doc)
                             matched = True
                             break
                     else:
@@ -189,6 +256,7 @@ def build_document_graph(excel_dir):
                                 'original_text': link,
                                 'match_type': 'partial'
                             })
+                            doc_to_matched_links[source_doc].append(actual_doc)
                             matched = True
                             break
             
@@ -199,6 +267,23 @@ def build_document_graph(excel_dir):
                     'normalized': normalized_link
                 })
     
+    # 共通情報ベースの関連度マトリクスを計算（Jaccard係数）
+    print("\nCalculating relevance matrix based on common links (Jaccard similarity)...")
+    doc_ids = [d['id'] for d in documents]
+    relevance_matrix = {}
+    
+    for i, doc_a in enumerate(doc_ids):
+        relevance_matrix[doc_a] = {}
+        links_a = doc_to_matched_links.get(doc_a, [])
+        
+        for j, doc_b in enumerate(doc_ids):
+            if doc_a == doc_b:
+                relevance_matrix[doc_a][doc_b] = 1.0
+            else:
+                links_b = doc_to_matched_links.get(doc_b, [])
+                similarity = calculate_jaccard_similarity(links_a, links_b)
+                relevance_matrix[doc_a][doc_b] = round(similarity, 3)
+    
     # 結果をまとめる
     result = {
         'metadata': {
@@ -206,11 +291,14 @@ def build_document_graph(excel_dir):
             'source_directory': str(excel_dir),
             'total_documents': len(documents),
             'total_matched_links': len(matched_links),
-            'total_unmatched_links': len(unmatched_links)
+            'total_unmatched_links': len(unmatched_links),
+            'relevance_calculation_method': 'jaccard_similarity',
+            'subdirectories_searched': len(set([d['directory'] for d in documents]))
         },
         'documents': documents,
         'links': matched_links,
-        'unmatched_links': unmatched_links
+        'unmatched_links': unmatched_links,
+        'relevance_matrix': relevance_matrix
     }
     
     return result
@@ -280,7 +368,24 @@ def save_results(result, output_dir="extraction_results"):
                 ])
         print(f"✓ Saved unmatched links: {unmatched_path}")
     
-    # 5. サマリーレポート
+    # 5. 関連度マトリクスCSV（共通情報ベース）
+    if 'relevance_matrix' in result:
+        relevance_path = output_dir / f"relevance_matrix_jaccard_{timestamp}.csv"
+        doc_ids = sorted(result['relevance_matrix'].keys())
+        
+        with open(relevance_path, "w", encoding="utf-8-sig", newline='') as f:
+            writer = csv.writer(f)
+            # ヘッダー行
+            writer.writerow([''] + doc_ids)
+            # データ行
+            for doc_a in doc_ids:
+                row = [doc_a]
+                for doc_b in doc_ids:
+                    row.append(result['relevance_matrix'][doc_a][doc_b])
+                writer.writerow(row)
+        print(f"✓ Saved relevance matrix (Jaccard): {relevance_path}")
+    
+    # 6. サマリーレポート
     summary = {
         'total_documents': result['metadata']['total_documents'],
         'total_matched_links': result['metadata']['total_matched_links'],
@@ -289,6 +394,28 @@ def save_results(result, output_dir="extraction_results"):
         'documents_with_links': len([d for d in result['documents'] if d['extracted_links_count'] > 0]),
         'documents_without_links': len([d for d in result['documents'] if d['extracted_links_count'] == 0]),
     }
+    
+    # 関連度マトリクスの統計
+    if 'relevance_matrix' in result:
+        relevances = []
+        doc_ids = list(result['relevance_matrix'].keys())
+        for i, doc_a in enumerate(doc_ids):
+            for j, doc_b in enumerate(doc_ids):
+                if i < j:  # 上三角のみ（重複を避ける）
+                    relevances.append(result['relevance_matrix'][doc_a][doc_b])
+        
+        if relevances:
+            import statistics
+            summary['relevance_stats'] = {
+                'method': 'jaccard_similarity',
+                'mean': round(statistics.mean(relevances), 3),
+                'median': round(statistics.median(relevances), 3),
+                'min': round(min(relevances), 3),
+                'max': round(max(relevances), 3),
+                'pairs_above_0.3': len([r for r in relevances if r >= 0.3]),
+                'pairs_above_0.5': len([r for r in relevances if r >= 0.5]),
+                'pairs_above_0.7': len([r for r in relevances if r >= 0.7])
+            }
     
     summary_path = output_dir / f"summary_{timestamp}.json"
     with open(summary_path, "w", encoding="utf-8") as f:
@@ -299,11 +426,22 @@ def save_results(result, output_dir="extraction_results"):
     print("\n" + "="*60)
     print("EXTRACTION SUMMARY")
     print("="*60)
+    print(f"Source directory:          {result['metadata']['source_directory']}")
+    print(f"Subdirectories searched:   {result['metadata'].get('subdirectories_searched', 1)}")
     print(f"Total documents:           {summary['total_documents']}")
     print(f"Documents with links:      {summary['documents_with_links']}")
     print(f"Documents without links:   {summary['documents_without_links']}")
     print(f"Matched links:             {summary['total_matched_links']}")
     print(f"Unmatched links:           {summary['total_unmatched_links']}")
+    
+    if 'relevance_stats' in summary:
+        print("\nRelevance Statistics (Jaccard Similarity):")
+        print(f"Mean relevance:            {summary['relevance_stats']['mean']}")
+        print(f"Median relevance:          {summary['relevance_stats']['median']}")
+        print(f"Pairs with relevance ≥0.3: {summary['relevance_stats']['pairs_above_0.3']}")
+        print(f"Pairs with relevance ≥0.5: {summary['relevance_stats']['pairs_above_0.5']}")
+        print(f"Pairs with relevance ≥0.7: {summary['relevance_stats']['pairs_above_0.7']}")
+    
     print("="*60)
     
     return json_path, simple_path
