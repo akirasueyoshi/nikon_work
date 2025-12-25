@@ -1,0 +1,31 @@
+[project]
+name = "document-relevance-matrix"
+version = "1.0.0"
+description = "Extract document links from Excel files and calculate relevance matrices"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Akira Sueyoshi" }
+]
+
+dependencies = [
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0",
+    "numpy>=1.24.0",
+    "matplotlib>=3.7.0",
+    "seaborn>=0.12.0",
+]
+
+[project.scripts]
+extract-links = "document_relevance_matrix.extract_links:main"
+calculate-relevance = "document_relevance_matrix.build_matrix:main"
+# 互換性のため
+build-matrix = "document_relevance_matrix.build_matrix:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = []
