@@ -127,36 +127,61 @@ def build_document_graph(excel_dir):
         documents.append(doc_info)
         doc_id_to_normalized[doc_id] = normalized_name
     
-    # リンクをマッチング
+    # リンクをマッチング（実在するファイルと仮想ドキュメント）
     print("\nMatching links to documents...")
+    print("\nAvailable document IDs (normalized):")
+    for doc_id, normalized in sorted(doc_id_to_normalized.items()):
+        print(f"  '{doc_id}' → '{normalized}'")
+    
+    # すべての抽出されたリンクを収集（仮想ドキュメントも含む）
+    all_link_texts = set()
+    for doc in documents:
+        for link_text in doc['extracted_links']:
+            all_link_texts.add(link_text)
+    
+    # 仮想ドキュメントIDマッピングを作成
+    virtual_doc_mapping = {}
+    for link_text in all_link_texts:
+        normalized = normalize_doc_name(link_text)
+        # 実在するドキュメントとマッチするか確認
+        matched_real_doc = None
+        for doc_id, doc_normalized in doc_id_to_normalized.items():
+            if normalized == doc_normalized:
+                matched_real_doc = doc_id
+                break
+        
+        if matched_real_doc:
+            virtual_doc_mapping[link_text] = matched_real_doc
+        else:
+            # 仮想ドキュメントとして扱う
+            virtual_doc_id = normalized.replace(' ', '_')  # 正規化名をIDに
+            virtual_doc_mapping[link_text] = virtual_doc_id
+    
     links = []
     unmatched_links = []
     
+    print("\n📝 Link mapping:")
     for doc in documents:
         source_id = doc['id']
         
         for link_text in doc['extracted_links']:
-            normalized_link = normalize_doc_name(link_text)
+            target_id = virtual_doc_mapping.get(link_text)
             
-            # マッチングを試行
-            matched = False
-            for target_id, target_normalized in doc_id_to_normalized.items():
-                if normalized_link == target_normalized:
-                    links.append({
-                        "source": source_id,
-                        "target": target_id,
-                        "original_text": link_text,
-                        "match_type": "exact"
-                    })
-                    matched = True
-                    break
-            
-            if not matched:
+            if target_id:
+                links.append({
+                    "source": source_id,
+                    "target": target_id,
+                    "original_text": link_text,
+                    "match_type": "exact" if target_id in doc_id_to_normalized else "virtual"
+                })
+                print(f"  ✓ {source_id} → {target_id} ({link_text})")
+            else:
                 unmatched_links.append({
                     "source": source_id,
                     "original_text": link_text,
-                    "normalized": normalized_link
+                    "normalized": normalize_doc_name(link_text)
                 })
+                print(f"  ⚠️  Unmatched: '{link_text}' → '{normalize_doc_name(link_text)}'")
     
     print(f"  Matched: {len(links)} links")
     print(f"  Unmatched: {len(unmatched_links)} links")
