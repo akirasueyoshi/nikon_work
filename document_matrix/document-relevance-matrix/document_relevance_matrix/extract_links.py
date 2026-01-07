@@ -67,7 +67,14 @@ def extract_links_from_excel(excel_path):
 
 def normalize_doc_name(name):
     """資料名を正規化"""
-    name = re.sub(r'\.(xlsx?|xls|docx?|pdf)$', '', name, flags=re.IGNORECASE)
+    # 拡張子を削除（.xlsx, .xls, .xlsm, .doc, .docx, .pdf など）
+    name = re.sub(r'\.(xlsx?m?|xls|docx?|pdf)$', '', name, flags=re.IGNORECASE)
+    
+    # 末尾の _数字 パターン（バージョン番号）を削除
+    # 例: "document_v1" → "document", "spec_2" → "spec"
+    name = re.sub(r'_\d+$', '', name)
+    
+    # 全角スペースを半角に、アンダースコアをスペースに変換
     name = name.replace('　', ' ').replace('_', ' ').strip()
     return name
 
