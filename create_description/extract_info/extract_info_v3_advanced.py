@@ -1,8 +1,7 @@
 import pandas as pd
 import os
 import time
-import json
-from typing import List, Dict, Tuple
+from typing import List, Tuple
 from azure.identity import InteractiveBrowserCredential, get_bearer_token_provider
 from openai import AzureOpenAI
 
@@ -40,7 +39,6 @@ PROMPT = """
 
 INPUT_DIR = r'resource'
 OUTPUT_DIR = r'information'
-PROGRESS_FILE = r'progress.json'
 
 # レート制限対策の待機時間（秒）
 WAIT_TIME_BETWEEN_SHEETS = 2
@@ -239,32 +237,14 @@ def extract_info(rel_path: str, resource_dir: str, client: AzureOpenAI,
     return "".join(extracted_parts)
 
 
-def load_progress() -> Dict:
-    """処理進捗を読み込み"""
-    if os.path.exists(PROGRESS_FILE):
-        with open(PROGRESS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return {"completed": [], "failed": []}
-
-
-def save_progress(progress: Dict):
-    """処理進捗を保存"""
-    with open(PROGRESS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(progress, f, ensure_ascii=False, indent=2)
-
-
-def main(use_chunking: bool = False, resume: bool = True):
+def main(use_chunking: bool = False):
     """
     メイン処理
     
     Args:
         use_chunking: 大きなシートをチャンク分割するか
-        resume: 中断したところから再開するか
     """
     inputs = get_excel_files(INPUT_DIR)
-    
-    # 進捗情報を読み込み
-    progress = load_progress() if resume else {"completed": [], "failed": []}
     
     # 出力済みのマークダウンファイルを取得
     output_mds = []
@@ -277,15 +257,17 @@ def main(use_chunking: bool = False, resume: bool = True):
                     rel_path_without_ext = os.path.splitext(rel_path)[0]
                     output_mds.append(rel_path_without_ext)
     
-    # 未処理のファイルを抽出（完了済みと失敗済みを除外）
-    completed_set = set(progress.get("completed", []))
-    undescribeds = [f for f in inputs if f not in output_mds and f not in completed_set]
+    # 未処理のファイルを抽出（.mdファイルが存在しないもののみ）
+    undescribeds = [f for f in inputs if f not in output_mds]
     
     print(f'Found {len(inputs)} Excel files')
-    print(f'Already completed: {len(progress.get("completed", []))}')
-    print(f'Previously failed: {len(progress.get("failed", []))}')
+    print(f'Already processed: {len(output_mds)}')
     print(f'Processing {len(undescribeds)} files...')
     print(f'Chunking mode: {"ON" if use_chunking else "OFF"}')
+    
+    if len(undescribeds) == 0:
+        print('No files to process.')
+        return
     
     client = get_client()
     
@@ -302,12 +284,6 @@ def main(use_chunking: bool = False, resume: bool = True):
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(description)
             
-            # 進捗を更新
-            progress["completed"].append(undescribed)
-            if undescribed in progress.get("failed", []):
-                progress["failed"].remove(undescribed)
-            save_progress(progress)
-            
             print(f'✓ Information file created: {undescribed}')
             
             # ファイル間の待機
@@ -316,14 +292,9 @@ def main(use_chunking: bool = False, resume: bool = True):
             
         except Exception as e:
             print(f'✗ Error processing {undescribed}: {str(e)}')
-            if undescribed not in progress.get("failed", []):
-                progress.setdefault("failed", []).append(undescribed)
-            save_progress(progress)
     
     print(f'\n{"="*60}')
     print(f'Processing complete!')
-    print(f'Total completed: {len(progress.get("completed", []))}')
-    print(f'Total failed: {len(progress.get("failed", []))}')
 
 
 if __name__ == "__main__":
@@ -332,9 +303,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Extract information from Excel files')
     parser.add_argument('--chunking', action='store_true', 
                        help='Enable chunking for large sheets')
-    parser.add_argument('--no-resume', action='store_true',
-                       help='Start from scratch (ignore progress file)')
     
     args = parser.parse_args()
     
-    main(use_chunking=args.chunking, resume=not args.no_resume)
+    main(use_chunking=args.chunking)
